@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user profile information like name, bio, and avatar URL.",
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "description": "The user's display name."
+        },
+        "bio": {
+          "type": "string",
+          "description": "A short bio about the user."
+        },
+        "photoURL": {
+          "type": "string",
+          "format": "uri",
+          "description": "The URL of the user's profile picture."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "The user's email address."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The date and time the profile was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The date and time the profile was last updated."
+        }
+      },
+      "required": ["displayName", "email"]
+    },
+    "SiteContent": {
+      "title": "Site Content",
+      "description": "Global website content managed by admin.",
+      "type": "object",
+      "properties": {
+        "hero": { "type": "object" },
+        "about": { "type": "object" },
+        "services": { "type": "array" },
+        "projects": { "type": "array" },
+        "socials": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Secret": {
+      "title": "Secret",
+      "description": "Sensitive application secrets.",
+      "type": "object",
+      "properties": {
+        "value": { "type": "string" }
+      }
+    },
+    "ProjectRequest": {
+      "title": "Project Request",
+      "description": "Stores user project requests sent to the admin.",
+      "type": "object",
+      "properties": {
+        "projectName": { "type": "string" },
+        "details": { "type": "string" },
+        "imageUrl": { "type": "string", "format": "uri" },
+        "userEmail": { "type": "string", "format": "email" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["projectName", "details", "userEmail", "userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Collection of user profiles, keyed by their Firebase Auth UID."
+    },
+    "/site_content/{contentId}": {
+      "schema": "SiteContent",
+      "description": "Collection of site content versions."
+    },
+    "/secrets/{secretId}": {
+      "schema": "Secret",
+      "description": "Collection of sensitive secrets."
+    },
+    "/project_requests/{requestId}": {
+      "schema": "ProjectRequest",
+      "description": "Collection of project requests sent by users."
+    }
+  }
+}

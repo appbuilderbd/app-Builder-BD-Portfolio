@@ -1,5 +1,11 @@
 import React, { useCallback, useRef, useState, useEffect } from 'react';
 import { motion, AnimatePresence, useScroll, useTransform, useInView, animate, useMotionValue } from 'motion/react';
+import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
+import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from './firebase';
+import { FirebaseProvider, useAuth, handleFirestoreError, OperationType } from './components/FirebaseProvider';
+import { Auth } from './components/Auth';
+import { Profile } from './components/Profile';
 import { 
   ArrowRight, 
   CheckCircle2, 
@@ -26,8 +32,11 @@ import {
   Monitor,
   Moon,
   Sun,
-  ArrowUp
+  ArrowUp,
+  Briefcase
 } from 'lucide-react';
+import { ProjectRequestModal } from './components/ProjectRequestModal';
+import { CopyProtection } from './components/CopyProtection';
 
 // Counter Component for animated numbers
 function Counter({ value, duration = 2 }: { value: string, duration?: number }) {
@@ -331,15 +340,57 @@ const WalkingCharacter = () => {
   );
 };
 
-export default function App() {
+function AuthButton({ onAdminClick }: { onAdminClick?: () => void }) {
+  const { user, profile, loading } = useAuth();
+  const navigate = useNavigate();
+
+  if (loading) return <div className="w-10 h-10 rounded-full bg-white/5 animate-pulse" />;
+
+  if (user) {
+    return (
+      <div className="flex items-center gap-2">
+        {profile?.role === 'admin' && (
+          <button 
+            onClick={onAdminClick}
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#00ff88] text-black text-[10px] md:text-xs font-black hover:bg-[#00ff88]/90 transition-all shadow-[0_0_15px_rgba(0,255,136,0.2)] uppercase tracking-widest"
+          >
+            <Settings size={14} className="hidden md:block" /> Dashboard
+          </button>
+        )}
+        <Link 
+          to="/profile"
+          className="flex items-center gap-2 px-4 py-2 rounded-full bg-bg-secondary border border-border-primary text-text-primary text-[10px] md:text-xs font-bold hover:bg-bg-secondary/80 transition-all"
+        >
+          {profile?.photoURL ? (
+            <img src={profile.photoURL} alt="" className="w-5 h-5 rounded-full object-cover" />
+          ) : (
+            <User size={14} />
+          )}
+          <span className="hidden md:inline">{profile?.displayName || 'Profile'}</span>
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <Link 
+      to="/login"
+      className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#00ff88] text-black text-[10px] md:text-xs font-black hover:bg-[#00ff88]/90 transition-all shadow-[0_0_15px_rgba(0,255,136,0.2)] uppercase tracking-widest"
+    >
+      <User size={14} /> Login
+    </Link>
+  );
+}
+
+function AppContent() {
   const [currentPage, setCurrentPage] = useState<'home' | 'admin'>('home');
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<any | null>(null);
-  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
-  const [passwordInput, setPasswordInput] = useState('');
-  const [passwordError, setPasswordError] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
-  const [clickCount, setClickCount] = useState(0);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const { user, profile } = useAuth();
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('theme');
     return saved || 'dark';
@@ -359,96 +410,114 @@ export default function App() {
   };
 
   // Portfolio Content State
-  const [content, setContent] = useState(() => {
-    const defaultContent = {
-      hero: {
-        title: "Full-Stack App Developer \n & Creative Brand Designer",
-        firstName: "app",
-        middleChar: "B",
-        lastName: "uilder BD",
-        bio: "I craft high-performance mobile & web applications with a focus on stunning UI/UX and creative brand identity. Bridging the gap between complex code and beautiful design.",
-        avatar: "https://picsum.photos/seed/developer-avatar/800/800"
-      },
-      services: [
-        { title: "MOBILE APP DEVELOPMENT", image: "https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?auto=format&fit=crop&q=80&w=800", link: "", description: "Building high-performance, native-feel mobile applications for iOS and Android using React Native and Flutter." },
-        { title: "FULL-STACK WEB APPS", image: "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&q=80&w=800", link: "", description: "Scalable, secure, and modern web applications built with React, Next.js, and Node.js." },
-        { title: "UI/UX & PRODUCT DESIGN", image: "https://images.unsplash.com/photo-1586717791821-3f44a563dc4c?auto=format&fit=crop&q=80&w=800", link: "", description: "User-centric design that focuses on usability, accessibility, and aesthetic appeal." },
-        { title: "BRAND IDENTITY & LOGO DESIGN", image: "https://images.unsplash.com/photo-1626785774573-4b799315345d?auto=format&fit=crop&q=80&w=800", link: "", description: "Professional brand identity and logo design services that tell your story." },
-        { title: "AI-POWERED SOLUTIONS", image: "https://images.unsplash.com/photo-1677442136019-21780ecad995?auto=format&fit=crop&q=80&w=800", link: "", description: "Integrating cutting-edge AI models like Gemini and OpenAI into your business workflows." },
-        { title: "GRAPHIC & MOTION DESIGN", image: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&q=80&w=800", link: "", description: "Eye-catching graphics and motion designs for social media, ads, and more." }
-      ],
-      projects: [
-        { title: "E-Commerce App", category: "Mobile App", description: "A full-featured e-commerce application with real-time tracking, secure payments, and a sleek UI.", image: "https://images.unsplash.com/photo-1556742049-02e49f9d4b10?auto=format&fit=crop&q=80&w=800", tech: ["React Native", "Firebase", "Stripe"] },
-        { title: "Social Connect", category: "Web App", description: "A social media platform for professionals to share insights and collaborate on projects.", image: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&q=80&w=800", tech: ["Next.js", "Tailwind", "PostgreSQL"] },
-        { title: "Brand Identity - Zenith", category: "Graphic Design", description: "Complete brand identity for a tech startup, including logo, typography, and marketing assets.", image: "https://images.unsplash.com/photo-1572044162444-ad60f128bde2?auto=format&fit=crop&q=80&w=800", tech: ["Illustrator", "Photoshop", "Figma"] },
-        { title: "Foodie Express", category: "Mobile App", description: "A multi-vendor food delivery platform with real-time GPS tracking and AI-based recommendations.", image: "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&q=80&w=800", tech: ["Flutter", "Node.js", "MongoDB"] },
-        { title: "FitTrack Pro", category: "Mobile App", description: "Advanced fitness tracking app with wearable integration and personalized workout plans.", image: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80&w=800", tech: ["React Native", "HealthKit", "Redux"] },
-        { title: "Estate Master", category: "Web App", description: "Premium real estate listing platform with 360-degree virtual tours and mortgage calculators.", image: "https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&q=80&w=800", tech: ["React", "Three.js", "Firebase"] }
-      ],
-      about: {
-        text: "I am a dedicated professional with over 5 years of experience in the digital space. My mission is to help businesses grow by providing them with high-quality, scalable, and visually stunning digital products. Whether it's a mobile app that millions will use or a brand identity that defines a company, I bring the same level of passion and precision to every project.",
-        experience: "5+ Years",
-        projects: "150+",
-        clients: "80+"
-      },
-      socials: {
-        gmail: "hello@ivannrence.com",
-        instagram: "https://instagram.com",
-        whatsapp: "https://wa.me/1234567890",
-        twitter: "https://twitter.com",
-        pinterest: "https://pinterest.com",
-        behance: "https://behance.net"
-      }
-    };
-
-    const saved = localStorage.getItem('portfolio_content');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        // Merge saved data with defaults to handle missing fields in older versions
-        return {
-          ...defaultContent,
-          ...parsed,
-          hero: { ...defaultContent.hero, ...parsed.hero },
-          about: { ...defaultContent.about, ...parsed.about },
-          socials: { ...defaultContent.socials, ...parsed.socials },
-          services: parsed.services || defaultContent.services,
-          projects: parsed.projects || defaultContent.projects
-        };
-      } catch (e) {
-        console.error("Failed to parse saved content", e);
-        return defaultContent;
-      }
+  const defaultContent = {
+    hero: {
+      title: "Full-Stack App Developer \n & Creative Brand Designer",
+      firstName: "app",
+      middleChar: "B",
+      lastName: "uilder BD",
+      bio: "I craft high-performance mobile & web applications with a focus on stunning UI/UX and creative brand identity. Bridging the gap between complex code and beautiful design.",
+      avatar: "https://picsum.photos/seed/developer-avatar/800/800"
+    },
+    services: [
+      { title: "MOBILE APP DEVELOPMENT", image: "https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?auto=format&fit=crop&q=80&w=800", link: "", description: "Building high-performance, native-feel mobile applications for iOS and Android using React Native and Flutter." },
+      { title: "FULL-STACK WEB APPS", image: "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&q=80&w=800", link: "", description: "Scalable, secure, and modern web applications built with React, Next.js, and Node.js." },
+      { title: "UI/UX & PRODUCT DESIGN", image: "https://images.unsplash.com/photo-1586717791821-3f44a563dc4c?auto=format&fit=crop&q=80&w=800", link: "", description: "User-centric design that focuses on usability, accessibility, and aesthetic appeal." },
+      { title: "BRAND IDENTITY & LOGO DESIGN", image: "https://images.unsplash.com/photo-1626785774573-4b799315345d?auto=format&fit=crop&q=80&w=800", link: "", description: "Professional brand identity and logo design services that tell your story." },
+      { title: "AI-POWERED SOLUTIONS", image: "https://images.unsplash.com/photo-1677442136019-21780ecad995?auto=format&fit=crop&q=80&w=800", link: "", description: "Integrating cutting-edge AI models like Gemini and OpenAI into your business workflows." },
+      { title: "GRAPHIC & MOTION DESIGN", image: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&q=80&w=800", link: "", description: "Eye-catching graphics and motion designs for social media, ads, and more." }
+    ],
+    projects: [
+      { title: "E-Commerce App", category: "Mobile App", description: "A full-featured e-commerce application with real-time tracking, secure payments, and a sleek UI.", image: "https://images.unsplash.com/photo-1556742049-02e49f9d4b10?auto=format&fit=crop&q=80&w=800", tech: ["React Native", "Firebase", "Stripe"] },
+      { title: "Social Connect", category: "Web App", description: "A social media platform for professionals to share insights and collaborate on projects.", image: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&q=80&w=800", tech: ["Next.js", "Tailwind", "PostgreSQL"] },
+      { title: "Brand Identity - Zenith", category: "Graphic Design", description: "Complete brand identity for a tech startup, including logo, typography, and marketing assets.", image: "https://images.unsplash.com/photo-1572044162444-ad60f128bde2?auto=format&fit=crop&q=80&w=800", tech: ["Illustrator", "Photoshop", "Figma"] },
+      { title: "Foodie Express", category: "Mobile App", description: "A multi-vendor food delivery platform with real-time GPS tracking and AI-based recommendations.", image: "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&q=80&w=800", tech: ["Flutter", "Node.js", "MongoDB"] },
+      { title: "FitTrack Pro", category: "Mobile App", description: "Advanced fitness tracking app with wearable integration and personalized workout plans.", image: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80&w=800", tech: ["React Native", "HealthKit", "Redux"] },
+      { title: "Estate Master", category: "Web App", description: "Premium real estate listing platform with 360-degree virtual tours and mortgage calculators.", image: "https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&q=80&w=800", tech: ["React", "Three.js", "Firebase"] }
+    ],
+    about: {
+      text: "I am a dedicated professional with over 5 years of experience in the digital space. My mission is to help businesses grow by providing them with high-quality, scalable, and visually stunning digital products. Whether it's a mobile app that millions will use or a brand identity that defines a company, I bring the same level of passion and precision to every project.",
+      experience: "5+ Years",
+      projects: "150+",
+      clients: "80+"
+    },
+    socials: {
+      gmail: "hello@ivannrence.com",
+      instagram: "https://instagram.com",
+      whatsapp: "https://wa.me/1234567890",
+      twitter: "https://twitter.com",
+      pinterest: "https://pinterest.com",
+      behance: "https://behance.net"
     }
-    return defaultContent;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('portfolio_content', JSON.stringify(content));
-  }, [content]);
-
-  const handleAvatarClick = () => {
-    setClickCount(prev => {
-      if (prev + 1 >= 5) {
-        setIsPasswordModalOpen(true);
-        return 0;
-      }
-      return prev + 1;
-    });
-    // Reset click count after 2 seconds of inactivity
-    setTimeout(() => setClickCount(0), 2000);
   };
 
-  const handlePasswordSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (passwordInput === 'sojibmia2006@') {
-      setIsPasswordModalOpen(false);
-      setCurrentPage('admin');
-      setPasswordInput('');
-      setPasswordError(false);
-    } else {
-      setPasswordError(true);
-      setTimeout(() => setPasswordError(false), 3000);
+  const [content, setContent] = useState(defaultContent);
+
+  // Load content from Firestore
+  useEffect(() => {
+    const contentDocRef = doc(db, 'site_content', 'main');
+    const unsubscribeContent = onSnapshot(contentDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setContent(prev => ({
+          ...prev,
+          ...data,
+          hero: { ...prev.hero, ...data.hero },
+          about: { ...prev.about, ...data.about },
+          socials: { ...prev.socials, ...data.socials },
+          services: data.services || prev.services,
+          projects: data.projects || prev.projects
+        }));
+      } else {
+        // Fallback to localStorage if Firestore is empty
+        const saved = localStorage.getItem('portfolio_content');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            setContent(prev => ({
+              ...prev,
+              ...parsed,
+              hero: { ...prev.hero, ...parsed.hero },
+              about: { ...prev.about, ...parsed.about },
+              socials: { ...prev.socials, ...parsed.socials },
+              services: parsed.services || prev.services,
+              projects: parsed.projects || prev.projects
+            }));
+          } catch (e) {
+            console.error("Failed to parse saved content", e);
+          }
+        }
+      }
+    });
+
+    return () => {
+      unsubscribeContent();
+    };
+  }, [profile?.role]);
+
+  const saveToCloud = async () => {
+    if (!profile || profile.role !== 'admin') {
+      alert("Only admins can save changes to the cloud.");
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveStatus('idle');
+    try {
+      const contentDocRef = doc(db, 'site_content', 'main');
+      await setDoc(contentDocRef, {
+        ...content,
+        updatedAt: serverTimestamp()
+      });
+      setSaveStatus('success');
+      localStorage.setItem('portfolio_content', JSON.stringify(content));
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    } catch (err) {
+      console.error("Error saving content:", err);
+      setSaveStatus('error');
+      handleFirestoreError(err, OperationType.WRITE, 'site_content/main');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -559,11 +628,29 @@ export default function App() {
               <Settings size={20} />
             </div>
             <div>
-              <h1 className="text-lg font-bold uppercase tracking-widest">Admin Dashboard</h1>
+              <h1 className="text-lg font-bold uppercase tracking-widest">Dashboard</h1>
               <p className="text-[10px] text-text-secondary uppercase font-bold tracking-tighter">Manage your portfolio content</p>
             </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-center">
+            <button 
+              onClick={saveToCloud}
+              disabled={isSaving}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${
+                saveStatus === 'success' ? 'bg-green-500 text-white' :
+                saveStatus === 'error' ? 'bg-red-500 text-white' :
+                'bg-[#00ff88] text-black hover:shadow-[0_0_20px_rgba(0,255,136,0.3)]'
+              } disabled:opacity-50`}
+            >
+              {isSaving ? (
+                <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+              ) : saveStatus === 'success' ? (
+                <CheckCircle2 size={14} />
+              ) : (
+                <Send size={14} />
+              )}
+              {isSaving ? 'Saving...' : saveStatus === 'success' ? 'Saved!' : saveStatus === 'error' ? 'Error!' : 'Save to Cloud'}
+            </button>
             <button 
               onClick={toggleTheme}
               className="p-2 bg-bg-primary border border-border-primary rounded-xl text-text-primary hover:bg-bg-secondary transition-all"
@@ -575,7 +662,7 @@ export default function App() {
               onClick={() => setCurrentPage('home')}
               className="flex items-center gap-2 px-4 py-2 bg-bg-primary border border-border-primary rounded-xl hover:bg-bg-secondary transition-colors text-xs font-bold uppercase tracking-widest text-text-primary"
             >
-              <LogOut size={14} /> Exit Admin
+              <LogOut size={14} /> Exit Dashboard
             </button>
           </div>
         </header>
@@ -957,7 +1044,7 @@ export default function App() {
         transition={{ duration: 0.8, ease: "circOut" }}
         className="fixed top-0 left-0 w-full z-50 px-6 py-8 flex justify-center gap-4 md:gap-8 bg-gradient-to-b from-bg-primary to-transparent pointer-events-none"
       >
-        <div className="flex gap-3 pointer-events-auto">
+        <div className="flex gap-3 pointer-events-auto items-center">
           <button 
             onClick={toggleTheme}
             className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-secondary border border-border-primary text-text-primary hover:bg-bg-secondary/80 transition-colors"
@@ -965,33 +1052,47 @@ export default function App() {
           >
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
+          
+          <Link 
+            to="/"
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-bg-secondary border border-border-primary text-text-primary text-xs font-medium hover:bg-bg-secondary/80 transition-colors"
+          >
+            Home
+          </Link>
+
+          {user && (
+            <button 
+              onClick={() => setIsProjectModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#00ff88]/10 border border-[#00ff88]/30 text-[#00ff88] text-xs font-bold hover:bg-[#00ff88]/20 transition-all"
+              title="Submit Project"
+            >
+              <Briefcase size={14} />
+              <span className="hidden sm:inline">Project</span>
+            </button>
+          )}
+
+          <AuthButton onAdminClick={() => setCurrentPage('admin')} />
+
           <button 
             onClick={() => scrollToSection('work')}
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-bg-secondary border border-[#00ff88]/30 text-[#00ff88] text-xs font-medium hover:bg-[#00ff88]/10 transition-colors"
+            className="hidden md:flex items-center gap-2 px-4 py-2 rounded-full bg-bg-secondary border border-[#00ff88]/30 text-[#00ff88] text-xs font-medium hover:bg-[#00ff88]/10 transition-colors"
           >
             <Eye size={14} /> See my work
-          </button>
-          <button 
-            onClick={() => setActiveModal('catalog')}
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-bg-secondary border border-[#00ff88]/30 text-[#00ff88] text-xs font-medium hover:bg-[#00ff88]/10 transition-colors"
-          >
-            <ShoppingBasket size={14} /> My catalog
-          </button>
-          <button 
-            onClick={() => setActiveModal('booking')}
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-bg-secondary border border-[#00ff88]/30 text-[#00ff88] text-xs font-medium hover:bg-[#00ff88]/10 transition-colors"
-          >
-            <CheckCircle2 size={14} /> Book a service
           </button>
         </div>
       </motion.nav>
 
       <main className="max-w-6xl mx-auto px-6 pt-32 pb-20">
-        {/* Hero Section */}
-        <section className="relative grid grid-cols-1 lg:grid-cols-12 gap-12 items-center mb-32">
-          {/* Left Content */}
-          <div className="lg:col-span-5 z-10 space-y-8">
-            <motion.h2 
+        <Routes>
+          <Route path="/login" element={<div className="pt-12"><Auth /></div>} />
+          <Route path="/profile" element={<div className="pt-12"><Profile /></div>} />
+          <Route path="/" element={
+            <>
+              {/* Hero Section */}
+              <section className="relative grid grid-cols-1 lg:grid-cols-12 gap-12 items-center mb-32">
+                {/* Left Content */}
+                <div className="lg:col-span-5 z-10 space-y-8">
+                  <motion.h2 
               initial={{ opacity: 0, x: -50 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
@@ -1060,18 +1161,36 @@ export default function App() {
               {content.hero.bio}
             </motion.p>
 
-            <motion.button
-              initial={{ opacity: 0, scale: 0.8 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              transition={{ duration: 0.5, delay: 0.6 }}
-              onClick={() => scrollToSection('contact')}
-              className="px-8 py-4 bg-[#00ff88] text-black font-bold rounded-2xl flex items-center gap-3 hover:shadow-[0_0_30px_rgba(0,255,136,0.3)] transition-all"
-            >
-              Start a Project <Send size={18} />
-            </motion.button>
+            <div className="flex flex-wrap gap-4">
+              <motion.button
+                initial={{ opacity: 0, scale: 0.8 }}
+                whileInView={{ opacity: 1, scale: 1 }}
+                viewport={{ once: true }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                transition={{ duration: 0.5, delay: 0.6 }}
+                onClick={() => scrollToSection('contact')}
+                className="px-8 py-4 bg-[#00ff88] text-black font-bold rounded-2xl flex items-center gap-3 hover:shadow-[0_0_30px_rgba(0,255,136,0.3)] transition-all"
+              >
+                Start a Project <Send size={18} />
+              </motion.button>
+
+              {!user && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  whileInView={{ opacity: 1, scale: 1 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.5, delay: 0.7 }}
+                >
+                  <Link 
+                    to="/login"
+                    className="px-8 py-4 bg-bg-secondary border border-border-primary text-text-primary font-bold rounded-2xl flex items-center gap-3 hover:bg-bg-secondary/80 transition-all"
+                  >
+                    Login <User size={18} />
+                  </Link>
+                </motion.div>
+              )}
+            </div>
 
             {/* Terminal Accent */}
             <motion.div 
@@ -1099,8 +1218,7 @@ export default function App() {
               whileInView={{ opacity: 1, x: 0, rotate: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 1, ease: "circOut" }}
-              onClick={handleAvatarClick}
-              className="relative w-full max-w-md aspect-square cursor-pointer"
+              className="relative w-full max-w-md aspect-square"
             >
               <div className="absolute inset-0 bg-gradient-to-tr from-[#00ff88]/20 to-transparent rounded-full blur-3xl" />
               <img 
@@ -1370,6 +1488,9 @@ export default function App() {
             ))}
           </motion.div>
         </section>
+            </>
+          } />
+        </Routes>
       </main>
 
       {/* Modals */}
@@ -1481,30 +1602,12 @@ export default function App() {
         </div>
       </Modal>
 
-      {/* Password Modal */}
-      <Modal 
-        isOpen={isPasswordModalOpen} 
-        onClose={() => setIsPasswordModalOpen(false)} 
-        title="Admin Authentication"
-      >
-        <form onSubmit={handlePasswordSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-text-secondary uppercase">Enter Password</label>
-            <input 
-              required 
-              type="password" 
-              value={passwordInput}
-              onChange={(e) => setPasswordInput(e.target.value)}
-              className={`w-full bg-bg-secondary border ${passwordError ? 'border-red-500' : 'border-border-primary'} rounded-xl px-4 py-3 focus:border-[#00ff88] outline-none transition-colors text-text-primary`} 
-              placeholder="••••••••" 
-            />
-            {passwordError && <p className="text-red-500 text-[10px] uppercase font-bold tracking-widest">Incorrect Password</p>}
-          </div>
-          <button type="submit" className="w-full py-4 bg-[#00ff88] text-black font-bold rounded-xl transition-all">
-            Unlock Admin Panel
-          </button>
-        </form>
-      </Modal>
+      <ProjectRequestModal 
+        isOpen={isProjectModalOpen} 
+        onClose={() => setIsProjectModalOpen(false)} 
+      />
+
+      <CopyProtection />
 
       {/* Footer */}
       <footer className="px-6 py-12 border-t border-border-primary text-center space-y-4">
@@ -1516,5 +1619,15 @@ export default function App() {
         </p>
       </footer>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <FirebaseProvider>
+      <BrowserRouter>
+        <AppContent />
+      </BrowserRouter>
+    </FirebaseProvider>
   );
 }
